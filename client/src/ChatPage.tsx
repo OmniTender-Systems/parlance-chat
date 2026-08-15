@@ -3,6 +3,7 @@ import { useAuth } from './AuthContext';
 import { api } from './api';
 import { getSocket } from './socket';
 import { decryptFrom, encryptFor } from './crypto/signal';
+import { cacheMessage, getCachedMessage } from './crypto/plaintextCache';
 
 interface Member {
   id: string;
@@ -48,11 +49,16 @@ export function ChatPage() {
       // only decrypt messages addressed to us (or our own outgoing echo, which
       // we already have plaintext for locally and skip re-decrypting)
       if (envelope.senderId === auth!.userId) return;
+      const senderName = conversations
+        .find((c) => c.id === envelope.conversationId)
+        ?.members.find((m) => m.id === envelope.senderId)?.username || 'unknown';
       try {
-        const text = await decryptFrom(auth!.userId, envelope.senderId, envelope.cipherType, envelope.ciphertext);
-        const senderName = conversations
-          .find((c) => c.id === envelope.conversationId)
-          ?.members.find((m) => m.id === envelope.senderId)?.username || 'unknown';
+        // a message key is single-use: if we already decrypted this message
+        // (e.g. a duplicate delivery), reuse the cached plaintext instead of
+        // decrypting again, which would throw.
+        const cached = getCachedMessage(auth!.userId, envelope.id);
+        const text = cached ? cached.text : await decryptFrom(auth!.userId, envelope.senderId, envelope.cipherType, envelope.ciphertext);
+        if (!cached) cacheMessage(auth!.userId, envelope.id, { senderId: envelope.senderId, senderName, text, createdAt: envelope.createdAt });
         setMessages((prev) => ({
           ...prev,
           [envelope.conversationId]: [
@@ -86,10 +92,19 @@ export function ChatPage() {
       const convo = conversations.find((c) => c.id === id);
       const decrypted: DisplayMessage[] = [];
       for (const row of rows) {
-        if (row.sender_id === auth!.userId) continue; // can't decrypt our own outgoing ciphertext
+        const senderName = convo?.members.find((m) => m.id === row.sender_id)?.username || 'unknown';
+        // We can't decrypt our own outgoing ciphertext (Double Ratchet is
+        // one-directional per key) and don't currently correlate our
+        // locally-generated draft id with the server's row id, so our own
+        // sent messages don't survive a reload in this MVP (see README).
+        if (row.sender_id === auth!.userId) continue;
         try {
-          const text = await decryptFrom(auth!.userId, row.sender_id, row.cipher_type, row.ciphertext);
-          const senderName = convo?.members.find((m) => m.id === row.sender_id)?.username || 'unknown';
+          // reuse cached plaintext if we already decrypted this one live —
+          // Double Ratchet message keys are single-use, so decrypting the
+          // same ciphertext twice would throw.
+          const cached = getCachedMessage(auth!.userId, row.id);
+          const text = cached ? cached.text : await decryptFrom(auth!.userId, row.sender_id, row.cipher_type, row.ciphertext);
+          if (!cached) cacheMessage(auth!.userId, row.id, { senderId: row.sender_id, senderName, text, createdAt: row.created_at });
           decrypted.push({ id: row.id, senderId: row.sender_id, senderName, text, createdAt: row.created_at });
         } catch (err) {
           console.error('history decrypt failed', err);

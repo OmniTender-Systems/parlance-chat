@@ -45,15 +45,25 @@ that runs directly in the browser with no native build step — a pragmatic
 stand-in, not the official implementation.
 
 **License implications — read this before you build on top of this repo.**
-This project vendors AGPL-3.0-influenced protocol code and, more importantly,
-we are choosing to license **this entire project AGPL-3.0** to stay
-consistent with the spirit of the crypto libraries in this space and the
-task's instruction. AGPL-3.0 means: if you run a modified version of this
-server (even just over a network, without distributing binaries — e.g. as a
-hosted chat service), **you must make your complete corresponding source
-available to users of that service.** This is stricter than the regular GPL.
-If you plan to build a closed/hosted product on this codebase, get your own
-legal review before doing so.
+We checked both licenses directly, not assumed:
+
+- `signalapp/libsignal` (the library we substituted away from, see above)
+  is **AGPL-3.0**.
+- `@privacyresearch/libsignal-protocol-typescript` (what we actually
+  depend on, `npm view @privacyresearch/libsignal-protocol-typescript
+  license`) is **GPL-3.0-only** — copyleft, but *not* AGPL's network-use
+  clause.
+
+Given that, and per the task's explicit instruction to flag licensing
+prominently, **we are licensing this entire project AGPL-3.0** — a
+deliberate choice to apply the stricter of the two (matching the spirit of
+the original libsignal recommendation), not an obligation inherited
+automatically from the GPL-3.0 dependency. AGPL-3.0 means: if you run a
+modified version of this server (even just over a network, without
+distributing binaries — e.g. as a hosted chat service), **you must make
+your complete corresponding source available to users of that service.**
+This is stricter than plain GPL. If you plan to build a closed/hosted
+product on this codebase, get your own legal review before doing so.
 
 ## What's implemented
 
@@ -93,6 +103,14 @@ legal review before doing so.
 - `oneTimePrekeys` are not automatically replenished server-side once
   consumed — a long-lived deployment would need a "request more prekeys"
   endpoint the client polls.
+- **Your own sent messages don't survive a page reload.** Double Ratchet is
+  one-directional per key, so a client can't decrypt its own outgoing
+  ciphertext; we show your own messages from local plaintext at send time,
+  but don't currently correlate that local draft with the server's message
+  row, so reloading loses your sent-message history for that session (the
+  *recipient's* copy is unaffected). A real fix would persist your own
+  plaintext locally, keyed by the server-assigned message id from a send
+  ack — left as follow-up work.
 
 ## Setup
 
